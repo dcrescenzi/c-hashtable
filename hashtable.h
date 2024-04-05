@@ -125,6 +125,7 @@ cell_info_t hashtable_insert(hashtable_t* hashtable, char* key, value_type value
 cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key);
 
 //lookup a key value pair in the passed hashtable, where the key arg is an sso
+//note this doesnt mean if key arg *can* be. It means only use this variant of lookup is key *is* represented in sso.
 //returns a cell_info_t, with status and pointer to cell if lookup succeeded (NULL otherwise).
 cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
 
@@ -134,6 +135,7 @@ cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_
 cell_info_t hashtable_delete(hashtable_t* hashtable, char* key);
 
 //delete a key value pair in the passed hashtable, where key arg is sso
+//note this doesnt mean if key arg *can* be. It means only use this variant of delete is key *is* represented in sso.
 //returns a cell_info_t, with status of deletion (cell pointer always NULL)
 //NOTE: needs customization if value_type requires special management.
 cell_info_t hashtable_delete_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
