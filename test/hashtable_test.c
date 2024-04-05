@@ -690,3 +690,8 @@ bool merge_squash()
     hashtable_cleanup(htb2);
     return pass;
 }
+
+bool char_ptr_is_8_bytes()
+{
+    return sizeof(char*) == 8;
+}

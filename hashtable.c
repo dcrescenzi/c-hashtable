@@ -57,7 +57,11 @@ hashtable_t* hashtable_init(uint32_t capacity)
     hashtable->capacity = capacity;
     hashtable->size = 0;
     hashtable->data = (cell_t*)malloc(sizeof(cell_t) * capacity);
-    for(uint32_t i = 0; i < hashtable->capacity; i++) hashtable->data[i].key = NULL;
+    for(uint32_t i = 0; i < hashtable->capacity; i++)
+    {
+        hashtable->data[i].key = NULL;
+        hashtable->data[i].sso_len = 0;
+    }
 
     if(hashtable_logs) hashtable_log(INFO, "hashtable_init", "created and initialized hashtable of capacity %u", capacity);
     return hashtable;
@@ -68,8 +72,9 @@ void hashtable_cleanup(hashtable_t* hashtable)
     if(hashtable_logs) hashtable_log(INFO, "hashtable_cleanup", "destroying hashtable of capacity %u with %u elements", hashtable->capacity, hashtable->size);
     for(uint32_t i = 0; i < hashtable->capacity; i++)
     {
-        free(hashtable->data[i].key);
+        if(hashtable->data[i].sso_len == -1) free(hashtable->data[i].key);
         hashtable->data[i].key = NULL;
+        hashtable->data[i].sso_len = 0;
         //<customize> cleanup any resources tied to value
     }
     free(hashtable->data);
@@ -103,8 +108,9 @@ uint32_t hashtable_resize(hashtable_t* hashtable, uint32_t new_capacity)
     {
         cell_t cell = hashtable->data[i];
         if(cell.key == NULL) continue;
-        hashtable_insert_(tmp_hashtable, cell.key, cell.value, /*resize*/ false, /*move*/ true);
+        hashtable_insert_(tmp_hashtable, cell.key, cell.value, /*resize*/ false, /*move*/ true, cell.sso_len);
         hashtable->data[i].key = NULL;
+        hashtable->data[i].sso_len = 0;
         //<customize> handle the fact that value may have been moved (prevent double free)
     }
 
@@ -145,9 +151,10 @@ uint32_t hashtable_clear(hashtable_t* hashtable)
     uint32_t num_deletions = 0;
     for(uint32_t i = 0; i < hashtable->capacity; i++)
     {
-        num_deletions += (hashtable->data[i].key == NULL ? 0 : 1);
-        free(hashtable->data[i].key);
+        num_deletions += (hashtable->data[i].key == NULL ? 0 : 1); //TODO fix this
+        if(hashtable->data[i].sso_len == -1) free(hashtable->data[i].key);
         hashtable->data[i].key = NULL;
+        hashtable->data[i].sso_len = 0;
         //<customize> cleanup any resources tied to value
     }
 
@@ -178,7 +185,7 @@ bool hashtable_merge(hashtable_t* dest, hashtable_t* src)
     {
         cell_t cell = src->data[i];
         if(cell.key == NULL) continue;
-        cell_info_t info = hashtable_insert_(dest, cell.key, cell.value, /*resize*/ true, /*move*/ false);
+        cell_info_t info = hashtable_insert_(dest, cell.key, cell.value, /*resize*/ true, /*move*/ false, cell.sso_len);
         if(hashtable_logs && info.status != OK) hashtable_log(WARN, "hashtable_merge", "found conflicting key '%s' during merge", cell.key);
         conflict |= info.status != OK;
     }
@@ -193,7 +200,7 @@ hashtable_t* hashtable_copy(hashtable_t* hashtable)
     {
         cell_t cell = hashtable->data[i];
         if(cell.key == NULL) continue;
-        hashtable_insert_(copy, cell.key, cell.value, /*resize*/ false, /*move*/ false);
+        hashtable_insert_(copy, cell.key, cell.value, /*resize*/ false, /*move*/ false, cell.sso_len);
     }
     if(hashtable_logs) hashtable_log(INFO, "hashtable_copy", "copied hashtable of size %u, capacity %u", hashtable->size, hashtable->capacity);
     return copy;
@@ -208,15 +215,59 @@ uint32_t hash(char* key) //local utility
     return val;
 }
 
+uint32_t hash_sso(char* key_ptr, size_t key_len) //local utility
+{
+    uint32_t val = 5381;
+    uint64_t key = (uint64_t)key_ptr;
+    int c;
+    
+    for(size_t i = 0; i < key_len; i++)
+    {
+        int c = (char)(key & 0xff);
+        val = ((val << 5) + val) + c;
+        key >>= 8;
+    }
+    return val;
+}
+
 uint32_t mod(uint32_t n, uint32_t d) //local utility
 {
     return n & (d - 1);
 }
 
-cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type value, bool auto_resize, bool move)
+char* encode_key_as_char_ptr(char* key, size_t key_len) //local utility
+{
+    int i = key_len-1;
+    uint64_t encoded = 0;
+    do
+    {
+        uint64_t c = (uint64_t)(*(key + i));
+        encoded <<= 8;
+        encoded |= c;
+    }
+    while(i-- != 0);
+    return (char*)encoded;
+}
+
+//if both_sso false, key2 should be the sso key
+bool cmp_sso(char* key1, char* key2, bool both_sso) //local utility
+{
+    if(both_sso) return key1 == key2;
+    
+    size_t size = strlen(key1);
+    for(size_t i = 0; i < size; i++)
+    {
+        if(*(key1+i) != (char)((uint64_t)key2 & 0xff)) return false;
+        key2 = (char*)((uint64_t)key2 >> 8);
+    }
+    return true;
+}
+
+cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type value, bool auto_resize, bool move, uint8_t sso_len)
 {
     cell_info_t insertion_result;
     insertion_result.cell = NULL;
+    bool sso_key = sso_len > 0;
 
     if(hashtable->size == hashtable->capacity)
     {
@@ -225,8 +276,15 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
         return insertion_result;
     }
 
-    uint32_t base_idx = hash(key);
+    uint32_t base_idx = sso_key ? hash_sso(key, sso_len) : hash(key);
     int probe = 0;
+
+    size_t key_len = sso_key ? sso_len : strlen(key);
+    if(key_len == 0)
+    {
+        insertion_result.status = EMPTY_KEY;
+        return insertion_result;
+    }
 
     do
     {
@@ -234,21 +292,32 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
         uint32_t idx = mod(unmod_idx, hashtable->capacity);
 
         cell_t cell = hashtable->data[idx];
-        if(!cell.key) //empty slot
+        if(cell.key == NULL) //empty slot
         {
-            if(move) //move in key and value
+            if(sso_key || key_len <= sizeof(char*)) //can do sso, or key already is sso
             {
-                hashtable->data[idx].key = key;
-                //<customize> properly handle resources while moving passed value to cell value
-                hashtable->data[idx].value = value;
-            }
-            else //copy over key and value
-            {
-                size_t key_len = strlen(key);
-                hashtable->data[idx].key = (char*)malloc((sizeof(char)*key_len) + 1);
-                strcpy(hashtable->data[idx].key, key);
+                hashtable->data[idx].key = sso_key ? key : encode_key_as_char_ptr(key, key_len);
                 //<customize> properly handle resources while assigning passed value to cell value
                 hashtable->data[idx].value = value;
+                hashtable->data[idx].sso_len = key_len; //TODO USER RESPONSIBE FOR NOT DEREFERENCING SSO KEY, use helper!
+            }
+            else //good old copy/move semantics
+            {
+                if(move) //move in key and value
+                {
+                    hashtable->data[idx].key = key;
+                    //<customize> properly handle resources while moving passed value to cell value
+                    hashtable->data[idx].value = value;
+                    hashtable->data[idx].sso_len = -1;
+                }
+                else //copy over key and value
+                {
+                    hashtable->data[idx].key = (char*)malloc((sizeof(char)*key_len) + 1);
+                    strcpy(hashtable->data[idx].key, key);
+                    //<customize> properly handle resources while assigning passed value to cell value
+                    hashtable->data[idx].value = value;
+                    hashtable->data[idx].sso_len = -1;
+                }
             }
 
             insertion_result.status = OK;
@@ -257,13 +326,24 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
             if(hashtable_logs) hashtable_log(INFO, "hashtable_insert", "insertion of key '%s' succeeded", key);
             break;
         }
-        else if(*key == *cell.key && strcmp(cell.key, key) == 0) //duplicate key
+        
+        //TODO switch this to a switch case with the input being the bools side by side as bits
+        //TODO add gitignore, clean all this up
+        //TODO add sso tests and modify old for a mix of sso and non sso
+        bool sso_cell = cell.sso_len > 0;
+        bool keymatch = false;
+        if(!sso_key && !sso_cell)       keymatch = (*key == *cell.key && strcmp(cell.key, key) == 0); //normal cmp
+        else if(sso_key && sso_cell)    keymatch = cmp_sso(cell.key, key, /*both_sso*/ true); //sso cmp
+        else if(sso_key)                keymatch = cmp_sso(cell.key, key, /*both_sso*/ false); //only inputted key sso
+        else                            keymatch = cmp_sso(key, cell.key, /*both_sso*/ false); //only cell key is sso
+        if(keymatch)
         {
             insertion_result.status = DUPLICATE_KEY;
             insertion_result.cell = &hashtable->data[idx];
             if(hashtable_logs) hashtable_log(WARN, "hashtable_insert", "insertion of key '%s' failed, duplicate key found", key);
             break;
         }
+
         probe++;
     } while(true); //ok since passed first check
 
@@ -275,7 +355,7 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
     {
         if(hashtable_logs) hashtable_log(INFO, "hashtable_insert", "insertion of key '%s' triggered resize to %u", key, hashtable->capacity << 1);
         hashtable_resize(hashtable, hashtable->capacity << 1);
-        insertion_result = hashtable_lookup(hashtable, key);
+        insertion_result = sso_key ? hashtable_lookup_sso(hashtable, key, key_len) : hashtable_lookup(hashtable, key);
     }
 
     return insertion_result;
@@ -283,7 +363,7 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
 
 cell_info_t hashtable_insert(hashtable_t* hashtable, char* key, value_type value)
 {
-    return hashtable_insert_(hashtable, key, value, /*resize*/ true, /*move*/ false);
+    return hashtable_insert_(hashtable, key, value, /*resize*/ true, /*move*/ false, 0);
 }
 
 cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key)
@@ -293,6 +373,13 @@ cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key)
 
     uint32_t base_idx = hash(key);
     int probe = 0;
+
+    size_t key_len = strlen(key);
+    if(key_len == 0)
+    {
+        lookup_result.status = EMPTY_KEY;
+        return lookup_result;
+    }
 
     do
     {
@@ -307,13 +394,18 @@ cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key)
         }
 
         cell_t cell = hashtable->data[idx];
-        if(!cell.key) //empty slot
+        if(cell.key == NULL) //empty slot
         {
             lookup_result.status = KEY_NOT_FOUND;
             if(hashtable_logs) hashtable_log(INFO, "hashtable_lookup", "lookup of key '%s' failed, not found", key);
             break;
         }
-        else if(strcmp(cell.key, key) == 0) //key found
+        
+        bool sso_cell = cell.sso_len > 0;
+        bool keymatch = false;
+        if(sso_cell)    keymatch = cmp_sso(key, cell.key, /*both_sso*/ false); //cell key only sso
+        else            keymatch = (*key == *cell.key && strcmp(cell.key, key) == 0); //both normal strings
+        if(keymatch)
         {
             lookup_result.status = OK;
             if(hashtable_logs) hashtable_log(INFO, "hashtable_lookup", "lookup of key '%s' succeeded", key);
@@ -326,7 +418,59 @@ cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key)
     return lookup_result;
 }
 
-cell_info_t hashtable_delete(hashtable_t* hashtable, char* key)
+cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_len)
+{
+    cell_info_t lookup_result;
+    lookup_result.cell = NULL;
+
+    uint32_t base_idx = hash_sso(key, sso_len);
+    int probe = 0;
+
+    size_t key_len = sso_len;
+    if(key_len == 0)
+    {
+        lookup_result.status = EMPTY_KEY;
+        return lookup_result;
+    }
+
+    do
+    {
+        uint32_t unmod_idx = base_idx + ((probe*(probe+1)) >> 1);
+        uint32_t idx = mod(unmod_idx, hashtable->capacity);
+
+        if(probe && idx == mod(base_idx, hashtable->capacity)) //full table cycle case
+        {
+            lookup_result.status = KEY_NOT_FOUND;
+            if(hashtable_logs) hashtable_log(INFO, "hashtable_lookup_sso", "lookup of key '%s' failed, not found", key);
+            break; 
+        }
+
+        cell_t cell = hashtable->data[idx];
+        if(cell.key == NULL) //empty slot
+        {
+            lookup_result.status = KEY_NOT_FOUND;
+            if(hashtable_logs) hashtable_log(INFO, "hashtable_lookup_sso", "lookup of key '%s' failed, not found", key);
+            break;
+        }
+
+        bool sso_cell = cell.sso_len > 0;
+        bool keymatch = false;
+        if(sso_cell)    keymatch = cmp_sso(cell.key, key, /*both_sso*/ true);  //cell key also sso
+        else            keymatch = cmp_sso(cell.key, key, /*both_sso*/ false); //only inputted key sso
+        if(keymatch)
+        {
+            lookup_result.status = OK;
+            if(hashtable_logs) hashtable_log(INFO, "hashtable_lookup_sso", "lookup of key '%s' succeeded", key);
+            lookup_result.cell = &hashtable->data[idx];
+            break;
+        }
+        probe++;
+    } while(true); //ok since passed first check
+
+    return lookup_result;
+}
+
+cell_info_t hashtable_delete(hashtable_t* hashtable, char* key) //TODO provide user facing util to decode sso key
 {
     cell_info_t lookup_result = hashtable_lookup(hashtable, key);
     if(lookup_result.status == KEY_NOT_FOUND)
@@ -335,8 +479,29 @@ cell_info_t hashtable_delete(hashtable_t* hashtable, char* key)
         return lookup_result;
     }
 
-    free(lookup_result.cell->key);
+    if(lookup_result.cell->sso_len == -1) free(lookup_result.cell->key);
     lookup_result.cell->key = NULL;
+    lookup_result.cell->sso_len = 0;
+    //<customize> properly delete resources while deleting cell value
+    hashtable->size--;
+
+    lookup_result.cell = NULL;
+    if(hashtable_logs) hashtable_log(INFO, "hashtable_delete", "deletion of key '%s' succeeded", key);
+    return lookup_result;
+}
+
+cell_info_t hashtable_delete_sso(hashtable_t* hashtable, char* key, uint8_t sso_len)
+{
+    cell_info_t lookup_result = hashtable_lookup_sso(hashtable, key, sso_len);
+    if(lookup_result.status == KEY_NOT_FOUND)
+    {
+        if(hashtable_logs) hashtable_log(WARN, "hashtable_delete", "deletion of key '%s' failed, not found", key);
+        return lookup_result;
+    }
+
+    if(lookup_result.cell->sso_len == -1) free(lookup_result.cell->key);
+    lookup_result.cell->key = NULL;
+    lookup_result.cell->sso_len = 0;
     //<customize> properly delete resources while deleting cell value
     hashtable->size--;
 

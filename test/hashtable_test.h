@@ -53,3 +53,6 @@ bool allow_reinsert_after_delete();
 //SUITE = combo_operations
 bool squash_copy();
 bool merge_squash();
+
+//SUITE = sso
+bool char_ptr_is_8_bytes();

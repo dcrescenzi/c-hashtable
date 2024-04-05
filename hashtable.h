@@ -33,6 +33,8 @@ run 'make test' or just 'make'.
 #include <string.h>
 #include <assert.h>
 
+//TODO RECOMMENT AND CLEAN ALL THIS!!!!!!
+
 typedef /*value type here ->*/ int /*<-*/ value_type;
 
 //specify max load factor, and logging
@@ -40,10 +42,13 @@ typedef /*value type here ->*/ int /*<-*/ value_type;
 #define hashtable_logs false
 
 //struct to represent a cell of the hashtable.
+//assuming int value, size stays at 16 (sso_len removes 1 byte of padding)
+//-1 sso_len means key treated as normal string. 0 is no key, anything else sso.
 typedef struct
 {
     char* key;
     value_type value;
+    int8_t sso_len;
 } cell_t;
 
 //struct to represent a hashtable.
@@ -60,7 +65,8 @@ typedef enum
     OK,
     DUPLICATE_KEY,
     KEY_NOT_FOUND,
-    HASHTABLE_FULL
+    HASHTABLE_FULL,
+    EMPTY_KEY
 } STATUS;
 
 //iterator-like struct to return insert/lookup/delete info
@@ -107,7 +113,7 @@ hashtable_t* hashtable_copy(hashtable_t* hashtable);
 //moving keys/values behavior.
 //returns a cell_info_t, with status and pointer to cell if insertion succeeded (NULL otherwise).
 //NOTE: needs customization if value_type requires special management.
-cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type value, bool auto_resize, bool move);
+cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type value, bool auto_resize, bool move, uint8_t sso_len);
 
 //insert a key value pair into the passed hashtable, and automatically resize if need be.
 //automatically copies key over, if moving preferred use above function.
@@ -118,9 +124,18 @@ cell_info_t hashtable_insert(hashtable_t* hashtable, char* key, value_type value
 //returns a cell_info_t, with status and pointer to cell if lookup succeeded (NULL otherwise).
 cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key);
 
+//lookup a key value pair in the passed hashtable, where the key arg is an sso
+//returns a cell_info_t, with status and pointer to cell if lookup succeeded (NULL otherwise).
+cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
+
 //delete a key value pair in the passed hashtable
 //returns a cell_info_t, with status of deletion (cell pointer always NULL)
 //NOTE: needs customization if value_type requires special management.
 cell_info_t hashtable_delete(hashtable_t* hashtable, char* key);
+
+//delete a key value pair in the passed hashtable, where key arg is sso
+//returns a cell_info_t, with status of deletion (cell pointer always NULL)
+//NOTE: needs customization if value_type requires special management.
+cell_info_t hashtable_delete_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
 
 #endif //INCLUDE_HASHTABLE_H
