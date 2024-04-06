@@ -151,7 +151,7 @@ uint32_t hashtable_clear(hashtable_t* hashtable)
     uint32_t num_deletions = 0;
     for(uint32_t i = 0; i < hashtable->capacity; i++)
     {
-        num_deletions += (hashtable->data[i].key == NULL ? 0 : 1); //TODO fix this
+        num_deletions += (hashtable->data[i].key == NULL ? 0 : 1);
         if(hashtable->data[i].sso_len == -1) free(hashtable->data[i].key);
         hashtable->data[i].key = NULL;
         hashtable->data[i].sso_len = 0;
@@ -299,7 +299,7 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
                 hashtable->data[idx].key = sso_key ? key : encode_key_as_char_ptr(key, key_len);
                 //<customize> properly handle resources while assigning passed value to cell value
                 hashtable->data[idx].value = value;
-                hashtable->data[idx].sso_len = key_len; //TODO USER RESPONSIBE FOR NOT DEREFERENCING SSO KEY, use helper!
+                hashtable->data[idx].sso_len = key_len;
             }
             else //good old copy/move semantics
             {
@@ -327,9 +327,6 @@ cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type valu
             break;
         }
         
-        //TODO switch this to a switch case with the input being the bools side by side as bits
-        //TODO add gitignore, clean all this up
-        //TODO add sso tests and modify old for a mix of sso and non sso
         bool sso_cell = cell.sso_len > 0;
         bool keymatch = false;
         if(!sso_key && !sso_cell)       keymatch = (*key == *cell.key && strcmp(cell.key, key) == 0); //normal cmp
@@ -470,7 +467,7 @@ cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_
     return lookup_result;
 }
 
-cell_info_t hashtable_delete(hashtable_t* hashtable, char* key) //TODO provide user facing util to decode sso key
+cell_info_t hashtable_delete(hashtable_t* hashtable, char* key)
 {
     cell_info_t lookup_result = hashtable_lookup(hashtable, key);
     if(lookup_result.status == KEY_NOT_FOUND)
@@ -508,4 +505,22 @@ cell_info_t hashtable_delete_sso(hashtable_t* hashtable, char* key, uint8_t sso_
     lookup_result.cell = NULL;
     if(hashtable_logs) hashtable_log(INFO, "hashtable_delete", "deletion of key '%s' succeeded", key);
     return lookup_result;
+}
+
+bool key_is_sso(cell_t cell)
+{
+    return cell.sso_len > 0;
+}
+
+char* decode_sso_key(char* sso_key, uint8_t sso_len)
+{
+    char* decoded = (char*)malloc(sizeof(char) * (sso_len + 1));
+    decoded[sso_len] = '\0';
+    uint64_t sso = (uint64_t)sso_key;
+    for(size_t i = 0; i < sso_len; i++)
+    {
+        *(decoded + i) = (char)(sso & 0xff);
+        sso >>= 8;
+    }
+    return decoded;
 }

@@ -33,8 +33,6 @@ run 'make test' or just 'make'.
 #include <string.h>
 #include <assert.h>
 
-//TODO RECOMMENT AND CLEAN ALL THIS!!!!!!
-
 typedef /*value type here ->*/ int /*<-*/ value_type;
 
 //specify max load factor, and logging
@@ -76,68 +74,101 @@ typedef struct
     STATUS status;
 } cell_info_t;
 
-//initialize a hashtable with passed capacity, which must be a power of 2.
-//returns a pointer to the new hashtable
+/// @brief Initialize a hashtable with given size. Must be a power of 2.
+/// @param capacity the hashtable's capacity, must be power of 2.
+/// @return Pointer to the new hashtable.
 hashtable_t* hashtable_init(uint32_t capacity);
 
-//cleanup the passed hashtable.
-//NOTE: needs customization if value_type requires special management.
+/// @brief Cleanup the given hashtable.
+/// @param hashtable the hashtable to cleanup.
+/// @return Nothing.
 void hashtable_cleanup(hashtable_t* hashtable);
 
-//resize the given hashtable to new_capacity, if possible.
-//returns the new capacity of the hashtable. 
+/// @brief Resize a hashtable to a new size, larger or smaller.
+/// @param hashtable the hashtable to resize.
+/// @param new_capacity the new size of the hashtable.
+/// @return The size after the resize operation.  Might not equal new_capacity.
 uint32_t hashtable_resize(hashtable_t* hashtable, uint32_t new_capacity);
 
-//squash the given hashtable to it's smallest possible memory footprint.
-//returns the new capacity of the hashtable.
+/// @brief Squash a hashtable to it's smallest possible memory footprint.
+/// @param hashtable the hashtable to squash.
+/// @return The new size of the hashtable.
 uint32_t hashtable_squash(hashtable_t* hashtable);
 
-//clear the given hashtable, making it empty.
-//returns the number of deleted items.
-//NOTE: needs customization if value_type requires special management.
+/// @brief Clear a hashtable of all elements.
+/// @param hashtable the hashtable to clear.
+/// @return The number of items deleted from the table.
 uint32_t hashtable_clear(hashtable_t* hashtable);
 
-//swap the 2 passed hashtables.
+/// @brief Swap 2 hashtables.
+/// @param rhs rhs hashtable to swap.
+/// @param lhs lhs hashtable to swap.
+/// @return Nothing.
 void hashtable_swap(hashtable_t* rhs, hashtable_t* lhs);
 
-//merge the src hashtable into dest, leaving src unchanged
-//if there is a key conflict, the value in dest takes precedence.
-//returns true if there was a key conflict found, false otherwise.
+/// @brief Merge the src hashtable into the dest hashtable and indicate any conflict. dest values preferred if conflict.
+/// @param dest The hashtable that will accept new elements.
+/// @param src The hashtable to be merged into dest.
+/// @return True if there were any key conflicts, false otherwise.
 bool hashtable_merge(hashtable_t* dest, hashtable_t* src);
 
-//perform a deep copy of the passed hashtable.
-//returns a pointer to the copy.
+/// @brief Make a deep copy of the passed hashtable.
+/// @param hashtable The hashtable to copy.
+/// @return The deep copy of the passed hashtable.
 hashtable_t* hashtable_copy(hashtable_t* hashtable);
 
-//insert a key value pair into the passed hashtable, with flags to control automatic resizing and
-//moving keys/values behavior.
-//returns a cell_info_t, with status and pointer to cell if insertion succeeded (NULL otherwise).
-//NOTE: needs customization if value_type requires special management.
+/// @brief Insert a key and value into the hashtable with extended options.
+/// @param hashtable The hashtable to insert into.
+/// @param key The key to insert.
+/// @param value The corresponding value to insert.
+/// @param auto_resize Whether or not this insertion should be allowed to trigger a resize.
+/// @param move Whether or not to move in key opposed to copying.
+/// @param sso_len length of sso key if key in sso form. -1 if normal string key.
+/// @return Cell info with insertion status. If success, cell pointer points to inserted cell. NULL otherwise.
 cell_info_t hashtable_insert_(hashtable_t* hashtable, char* key, value_type value, bool auto_resize, bool move, uint8_t sso_len);
 
-//insert a key value pair into the passed hashtable, and automatically resize if need be.
-//automatically copies key over, if moving preferred use above function.
-//returns a cell_info_t, with status and pointer to cell if insertion succeeded (NULL otherwise).
+/// @brief Insert a key and value into the hashtable with a key in normal form.
+/// @param hashtable The hashtable to insert into.
+/// @param key The key to insert.
+/// @param value The corresponding value to insert.
+/// @return Cell info with insertion status. If success, cell pointer points to inserted cell. NULL otherwise.
 cell_info_t hashtable_insert(hashtable_t* hashtable, char* key, value_type value);
 
-//lookup a key value pair in the passed hashtable
-//returns a cell_info_t, with status and pointer to cell if lookup succeeded (NULL otherwise).
+/// @brief Lookup from the hashtable with a key in normal form.
+/// @param hashtable The hashtable to lookup in.
+/// @param key The key to search.
+/// @return Cell info with lookup status. If success, cell pointer points to found cell. NULL otherwise.
 cell_info_t hashtable_lookup(hashtable_t* hashtable, char* key);
 
-//lookup a key value pair in the passed hashtable, where the key arg is an sso
-//note this doesnt mean if key arg *can* be. It means only use this variant of lookup is key *is* represented in sso.
-//returns a cell_info_t, with status and pointer to cell if lookup succeeded (NULL otherwise).
+/// @brief Lookup from the hashtable with a key in sso form.
+/// @param hashtable The hashtable to lookup in.
+/// @param key The key to search, in sso form.
+/// @param sso_len The length of the sso key.
+/// @return Cell info with lookup status. If success, cell pointer points to found cell. NULL otherwise.
 cell_info_t hashtable_lookup_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
 
-//delete a key value pair in the passed hashtable
-//returns a cell_info_t, with status of deletion (cell pointer always NULL)
-//NOTE: needs customization if value_type requires special management.
+/// @brief Delete from the hashtable with a key in normal form.
+/// @param hashtable The hashtable to delete from.
+/// @param key The key to delete.
+/// @return Cell info with deletion status. Cell pointer will always be NULL
 cell_info_t hashtable_delete(hashtable_t* hashtable, char* key);
 
-//delete a key value pair in the passed hashtable, where key arg is sso
-//note this doesnt mean if key arg *can* be. It means only use this variant of delete is key *is* represented in sso.
-//returns a cell_info_t, with status of deletion (cell pointer always NULL)
-//NOTE: needs customization if value_type requires special management.
+/// @brief Delete from the hashtable with a key in sso form.
+/// @param hashtable The hashtable to delete from.
+/// @param key The key to delete, in sso form.
+/// @param sso_len The length of the sso key.
+/// @return Cell info with deletion status. Cell pointer will always be NULL
 cell_info_t hashtable_delete_sso(hashtable_t* hashtable, char* key, uint8_t sso_len);
+
+/// @brief Given a cell, check whether the key is in sso form.
+/// @param cell The cell in question.
+/// @return True if key is in sso form, false otherwise.
+bool key_is_sso(cell_t cell);
+
+/// @brief Converts a char* from sso representation to a true string.  User responsible for freeing.
+/// @param sso The sso key in question.
+/// @param sso_len The length of the sso string.
+/// @return True string representation of the sso string.
+char* decode_sso_key(char* sso, uint8_t sso_len);
 
 #endif //INCLUDE_HASHTABLE_H
